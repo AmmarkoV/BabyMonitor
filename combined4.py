@@ -178,37 +178,142 @@ class ImageStreamHandler(BaseHTTPRequestHandler):
 # Main server (volume + audio + HTML)
 # ---------------------------
 class MainHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+ def do_GET(self):
         if "/volume" in self.path:
             self.handle_volume()
         elif self.path == "/audio.mp3":
             self.handle_audio()
-        elif self.path == "/beep_short.ogg":
+        elif "beep_short.ogg" in self.path :
             self.handle_ogg()
+        elif "beep_short.mp3" in self.path:
+            self.handle_mp3()
+        elif "beep_short.wav" in self.path:
+            self.handle_wav()
         else:
             self.handle_html()
-
-
-
-    def handle_ogg(self): 
-     ogg_path = "beep_short.ogg"
-     if not os.path.exists(ogg_path):
-        self.send_error(404, "File not found")
+    #----------------------------------------------------------
+ def handle_audio_file(self, filename, content_type):
+    """Generic handler for audio files with robust error handling"""
+    print(f"[AUDIO] Requested: {filename}")
+    
+    # Check if file exists
+    if not os.path.exists(filename):
+        print(f"[AUDIO] File not found: {filename}")
+        self.send_error(404, f"Audio file not found: {filename}")
         return
-     try:
-        with open(ogg_path, "rb") as f:
-            self.send_response(200)
-            self.send_header("Content-Type", "audio/ogg")
-            fs = os.fstat(f.fileno())
-            self.send_header("Content-Length", str(fs.st_size))
-            self.send_header("Accept-Ranges", "bytes")
-            self.end_headers()
-            self.wfile.write(f.read())
-     except Exception as e:
-        print("Failed to serve OGG:", e)
+    
+    # Check if file is readable
+    if not os.access(filename, os.R_OK):
+        print(f"[AUDIO] File not readable: {filename}")
+        self.send_error(403, f"Audio file not readable: {filename}")
+        return
+    
+    try:
+        # Get file stats first
+        file_stat = os.stat(filename)
+        file_size = file_stat.st_size
+        print(f"[AUDIO] File size: {file_size} bytes")
+        
+        # Check for empty file
+        if file_size == 0:
+            print(f"[AUDIO] Empty file: {filename}")
+            self.send_error(404, f"Audio file is empty: {filename}")
+            return
+        
+        # Read file in chunks for large files (though audio files are usually small)
+        data = bytearray()
+        with open(filename, "rb") as f:
+            while True:
+                chunk = f.read(8192)  # 8KB chunks
+                if not chunk:
+                    break
+                data.extend(chunk)
+        
+        # Verify we read the expected amount
+        if len(data) != file_size:
+            print(f"[AUDIO] Size mismatch: expected {file_size}, got {len(data)}")
+            self.send_error(500, "File read error")
+            return
+        
+        print(f"[AUDIO] Successfully read {len(data)} bytes")
+        
+        # Send response
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Range")
+        self.send_header("Cache-Control", "public, max-age=3600")
+        
+        # Add ETag for caching
+        import hashlib
+        etag = hashlib.md5(data).hexdigest()[:16]
+        self.send_header("ETag", f'"{etag}"')
+        
+        self.end_headers()
+        
+        # Write data to client
+        bytes_written = 0
+        chunk_size = 8192
+        for i in range(0, len(data), chunk_size):
+            chunk = data[i:i+chunk_size]
+            try:
+                self.wfile.write(chunk)
+                bytes_written += len(chunk)
+            except BrokenPipeError:
+                print(f"[AUDIO] Client disconnected after {bytes_written} bytes")
+                break
+            except Exception as e:
+                print(f"[AUDIO] Write error after {bytes_written} bytes: {e}")
+                break
+        
+        print(f"[AUDIO] Sent {bytes_written}/{len(data)} bytes successfully")
+        
+    except FileNotFoundError:
+        print(f"[AUDIO] File disappeared: {filename}")
+        self.send_error(404, "File not found")
+    except PermissionError:
+        print(f"[AUDIO] Permission denied: {filename}")
+        self.send_error(403, "Permission denied")
+    except IOError as e:
+        print(f"[AUDIO] IO Error reading {filename}: {e}")
+        self.send_error(500, "File read error")
+    except Exception as e:
+        print(f"[AUDIO] Unexpected error serving {filename}: {type(e).__name__}: {e}")
         self.send_error(500, "Internal server error")
 
-    def handle_volume(self):
+ # Handle OPTIONS requests for CORS preflight
+ def do_OPTIONS(self):
+    self.send_response(200)
+    self.send_header("Access-Control-Allow-Origin", "*")
+    self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+    self.send_header("Access-Control-Allow-Headers", "Range")
+    self.end_headers()
+
+ # Updated simplified handlers
+ def handle_ogg(self):
+    self.handle_audio_file("beep_short.ogg", "audio/ogg")
+
+ def handle_mp3(self):
+    self.handle_audio_file("beep_short.mp3", "audio/mpeg")
+
+ def handle_wav(self):
+    self.handle_audio_file("beep_short.wav", "audio/wav")
+
+ # Add HEAD method support for audio files
+ def do_HEAD(self):
+    if self.path == "/beep_short.ogg":
+        self.handle_ogg()
+    elif self.path == "/beep_short.mp3":
+        self.handle_mp3()
+    elif self.path == "/beep_short.wav":
+        self.handle_wav()
+    else:
+        self.send_error(404, "Not Found")
+    #----------------------------------------------------------
+ def handle_volume(self):
         vol = get_volume()
         payload = json.dumps({"volume": vol})
         self.send_response(200)
@@ -217,7 +322,7 @@ class MainHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload.encode('utf-8'))
 
-    def handle_audio(self):
+ def handle_audio(self):
         try:
             with open("audio.mp3", "rb") as f:
                 data = f.read()
@@ -229,66 +334,249 @@ class MainHandler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_error(404, "Audio file not found")
 
-    def handle_html(self): 
+ def handle_html(self):
         html = """
 <!DOCTYPE html>
 <html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+        #status { font-weight: bold; margin: 10px 0; }
+        #volume { font-size: 18px; margin: 10px 0; }
+        .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; font-family: monospace; }
+    </style>
+</head>
 <body>
-    <h1>Baby Monitor</h1>
+    <h1>Baby Monitor - DEBUG VERSION</h1>
     <img src="http://localhost:8001/stream.mjpg" width="640"/>
     <div id="volume">Volume: 0</div>
+    <div id="status">Status: Ready</div>
+    <div id="debug" class="debug">Debug info will appear here...</div>
+     
+    <!-- Multiple audio elements for better browser support -->
+    <audio id="alarm" preload="auto">
+        <source src="/beep_short.wav" type="audio/wav">
+        <source src="/beep_short.mp3" type="audio/mpeg">
+        <source src="/beep_short.ogg" type="audio/ogg">
+    </audio>
+    
+    <br>
+    <button id="playBtn">🔊 Test Alarm</button>
+    <button id="genBeepBtn">🎵 Generate Beep</button>
+    <button id="startBtn">▶️ Start Monitoring</button>
+    <button id="testFiles">🔍 Test Audio Files</button>
 
-    <audio id="alarm" src="/beep_short.ogg" preload="auto"></audio>
-    <button id="playBtn">Play Alarm</button> 
-    <button id="startBtn">Start Monitoring</button>
-
-<script> 
-const THRESHOLD = 60;
-let monitoring = false;
-
-const alarm = document.getElementById('alarm');
-
-function playAlarm() {
-    const ding = new Audio('/beep_short.ogg');
-    ding.play().catch(err => console.error('Playback failed:', err));
-}
-
-// Play alarm on button click (user gesture)
-document.getElementById('playBtn').addEventListener('click', () => {
-    playAlarm();
-    console.log("Playing alarm!");
-});
-
-// Start monitoring (user gesture allows future playback)
-document.getElementById('startBtn').addEventListener('click', () => {
-    monitoring = true;
-    document.getElementById('startBtn').style.display = 'none';
-    console.log("Monitoring started");
-});
-
-// Poll volume and play alarm if threshold is exceeded
-setInterval(async () => {
-    if (!monitoring) return;
-
-    try {
-        const r = await fetch('/volume');
-        const j = await r.json();
-        const vol = j.volume.toFixed(2);
-        document.getElementById('volume').innerText = 'Volume: ' + vol;
-
-        if (vol > THRESHOLD) {
-            playAlarm();
-        } else {
-            alarm.pause();
+    <script>
+        const THRESHOLD = 50;
+        let monitoring = false;
+        let audioContext = null;
+        let lastAlarmTime = 0;
+        const ALARM_COOLDOWN = 2000;
+        
+        const alarm = document.getElementById('alarm');
+        const status = document.getElementById('status');
+        const debug = document.getElementById('debug');
+        
+        function log(msg) {
+            console.log(msg);
+            debug.innerHTML += msg + '<br>';
         }
-    } catch (e) {
-        console.error("Volume fetch failed:", e);
-    }
-}, 200);
-</script>
+        
+        // Initialize audio context
+        async function initAudio() {
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    log(`✅ AudioContext created, state: ${audioContext.state}`);
+                }
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                    log(`✅ AudioContext resumed, new state: ${audioContext.state}`);
+                }
+                return true;
+            } catch (err) {
+                log(`❌ AudioContext failed: ${err.message}`);
+                return false;
+            }
+        }
+        
+        // Generate a beep sound programmatically
+        function generateBeep() {
+            if (!audioContext) return;
+            
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = 800; // 800 Hz
+            gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.05);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.5);
+            
+            log('🎵 Generated beep sound');
+        }
+        
+        // Test if audio files exist
+        async function testAudioFiles() {
+            const files = ['/beep_short.ogg', '/beep_short.mp3', '/beep_short.wav'];
+            
+            for (const file of files) {
+                try {
+                    const response = await fetch(file, { method: 'GET' });
+                    if (response.ok) {
+                        log(`✅ ${file} exists (${response.status})`);
+                    } else {
+                        log(`❌ ${file} not found (${response.status})`);
+                    }
+                } catch (err) {
+                    log(`❌ ${file} fetch failed: ${err.message}`);
+                }
+            }
+        }
+        
+        // Play alarm with detailed logging
+        async function playAlarm() {
+            const now = Date.now();
+            if (now - lastAlarmTime < ALARM_COOLDOWN) {
+                log('⏱️ Alarm on cooldown');
+                return;
+            }
+            
+            log('🚨 Attempting to play alarm...');
+            
+            try {
+                // Wait for audio to be ready
+                if (alarm.readyState < 2) { // HAVE_CURRENT_DATA = 2
+                    log(`⏳ Audio not ready (readyState: ${alarm.readyState}), waiting...`);
+                    
+                    // Wait for canplay event or timeout
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            log('⏰ Audio load timeout, using generated beep');
+                            generateBeep();
+                            resolve();
+                        }, 2000);
+                        
+                        const onCanPlay = () => {
+                            clearTimeout(timeout);
+                            alarm.removeEventListener('canplay', onCanPlay);
+                            log(`✅ Audio ready! (readyState: ${alarm.readyState})`);
+                            resolve();
+                        };
+                        
+                        alarm.addEventListener('canplay', onCanPlay);
+                        alarm.load(); // Force reload
+                    });
+                }
+                
+                // Reset and play
+                alarm.currentTime = 0;
+                log(`📍 Audio currentTime reset to: ${alarm.currentTime}`);
+                log(`📍 Audio readyState: ${alarm.readyState}`);
+                log(`📍 Audio paused: ${alarm.paused}`);
+                
+                if (alarm.readyState >= 2) {
+                    const playPromise = alarm.play();
+                    await playPromise;
+                    
+                    log('✅ Alarm playing successfully!');
+                    status.textContent = '🚨 ALARM PLAYING';
+                    lastAlarmTime = now;
+                } else {
+                    throw new Error('Audio still not ready after waiting');
+                }
+                
+            } catch (err) {
+                log(`❌ Alarm play failed: ${err.name} - ${err.message}`);
+                status.textContent = `❌ Audio Error: ${err.message}`;
+                
+                // Try generated beep as fallback
+                log('🔄 Trying generated beep fallback...');
+                generateBeep();
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('playBtn').addEventListener('click', async () => {
+            log('🖱️ Test button clicked');
+            await initAudio();
+            await playAlarm();
+        });
+        
+        document.getElementById('genBeepBtn').addEventListener('click', async () => {
+            log('🖱️ Generate beep clicked');
+            await initAudio();
+            generateBeep();
+        });
+        
+        document.getElementById('testFiles').addEventListener('click', async () => {
+            log('🖱️ Test files clicked');
+            await testAudioFiles();
+        });
+        
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            log('🖱️ Start monitoring clicked');
+            const audioReady = await initAudio();
+            if (!audioReady) {
+                status.textContent = '❌ Audio initialization failed';
+                return;
+            }
+            
+            monitoring = true;
+            document.getElementById('startBtn').style.display = 'none';
+            status.textContent = '👂 Monitoring active';
+            log('✅ Monitoring started');
+        });
+        
+        // Monitor audio loading
+        alarm.addEventListener('loadstart', () => log('📥 Audio loading started'));
+        alarm.addEventListener('loadeddata', () => log('✅ Audio data loaded'));
+        alarm.addEventListener('canplay', () => log('✅ Audio can play'));
+        alarm.addEventListener('error', (e) => log(`❌ Audio error event: ${e.message || 'Unknown error'}`));
+        
+        // Volume monitoring loop
+        setInterval(async () => {
+            if (!monitoring) return;
+            
+            try {
+                const response = await fetch('/volume');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const vol = parseFloat(data.volume);
+                
+                document.getElementById('volume').textContent = `Volume: ${vol.toFixed(2)}`;
+                
+                if (vol > THRESHOLD) {
+                    await playAlarm();
+                } else if (status.textContent.includes('ALARM')) {
+                    status.textContent = '👂 Monitoring active';
+                }
+                
+            } catch (error) {
+                console.error("Volume fetch failed:", error);
+                status.textContent = `❌ Connection error: ${error.message}`;
+            }
+        }, 200);
+        
+        // Initial file test
+        window.addEventListener('load', () => {
+            log('🚀 Page loaded, testing audio files...');
+            testAudioFiles();
+        });
+    </script>
 </body>
 </html>
         """
+
         self.send_response(200)
         self.send_header('Content-Type', 'text/html')
         self.send_header('Content-Length', str(len(html)))
