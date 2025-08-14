@@ -190,17 +190,23 @@ class MainHandler(BaseHTTPRequestHandler):
 
 
 
-    def handle_ogg(self):
-        try:
-            with open("beep_short.ogg", "rb") as f:
-                data = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "audio/ogg")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-        except FileNotFoundError:
-            self.send_error(404, "File not found")
+    def handle_ogg(self): 
+     ogg_path = "beep_short.ogg"
+     if not os.path.exists(ogg_path):
+        self.send_error(404, "File not found")
+        return
+     try:
+        with open(ogg_path, "rb") as f:
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/ogg")
+            fs = os.fstat(f.fileno())
+            self.send_header("Content-Length", str(fs.st_size))
+            self.send_header("Accept-Ranges", "bytes")
+            self.end_headers()
+            self.wfile.write(f.read())
+     except Exception as e:
+        print("Failed to serve OGG:", e)
+        self.send_error(500, "Internal server error")
 
     def handle_volume(self):
         vol = get_volume()
@@ -226,66 +232,62 @@ class MainHandler(BaseHTTPRequestHandler):
     def handle_html(self): 
         html = """
 <!DOCTYPE html>
+<html>
 <body>
     <h1>Baby Monitor</h1>
     <img src="http://localhost:8001/stream.mjpg" width="640"/>
     <div id="volume">Volume: 0</div>
 
-<audio id="alarm" src="/beep_short.ogg" preload="auto"></audio>
-<button id="playBtn">Play Alarm</button> 
-<button id="startBtn">Start Monitoring</button>
+    <audio id="alarm" src="/beep_short.ogg" preload="auto"></audio>
+    <button id="playBtn">Play Alarm</button> 
+    <button id="startBtn">Start Monitoring</button>
 
 <script> 
 const THRESHOLD = 60;
 let monitoring = false;
 
+const alarm = document.getElementById('alarm');
 
-function playSound () {
-	let ding = new Audio('/beep_short.ogg');
-	ding.play();
+function playAlarm() {
+    const ding = new Audio('/beep_short.ogg');
+    ding.play().catch(err => console.error('Playback failed:', err));
 }
 
-const alarm = document.getElementById('alarm');
-document.getElementById('playBtn').addEventListener('click', async () => 
-{
-    try {
-        playSound()
-        await alarm.play();
-        console.log("Playing alarm!");
-    } catch(err) {
-        console.error("Playback failed:", err);
-    }
+// Play alarm on button click (user gesture)
+document.getElementById('playBtn').addEventListener('click', () => {
+    playAlarm();
+    console.log("Playing alarm!");
 });
 
-document.getElementById('startBtn').addEventListener('click', () => 
-{
-    // User gesture allows audio playback
-    playSound()
-    alarm.play().then(() => alarm.pause());
+// Start monitoring (user gesture allows future playback)
+document.getElementById('startBtn').addEventListener('click', () => {
     monitoring = true;
     document.getElementById('startBtn').style.display = 'none';
+    console.log("Monitoring started");
 });
 
+// Poll volume and play alarm if threshold is exceeded
 setInterval(async () => {
     if (!monitoring) return;
-    const r = await fetch('/volume');
-    const j = await r.json();
-    const vol = j.volume.toFixed(2);
-    document.getElementById('volume').innerText = 'Volume: ' + vol;
 
-    if (vol > THRESHOLD) {
-        alarm.currentTime = 0;
-        playSound()
-    
-        alarm.play().catch(e => console.log('Alarm play failed:', e));
-    } else {
-        alarm.pause();
+    try {
+        const r = await fetch('/volume');
+        const j = await r.json();
+        const vol = j.volume.toFixed(2);
+        document.getElementById('volume').innerText = 'Volume: ' + vol;
+
+        if (vol > THRESHOLD) {
+            playAlarm();
+        } else {
+            alarm.pause();
+        }
+    } catch (e) {
+        console.error("Volume fetch failed:", e);
     }
 }, 200);
 </script>
 </body>
 </html>
-
         """
         self.send_response(200)
         self.send_header('Content-Type', 'text/html')
