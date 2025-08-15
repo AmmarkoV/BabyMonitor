@@ -380,17 +380,24 @@ class MainHandler(BaseHTTPRequestHandler):
 <html>
 <head>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+        body    { font-family: Arial, sans-serif; margin: 20px; }
+        button  { padding: 10px 20px; margin: 10px; font-size: 16px; }
         #status { font-weight: bold; margin: 10px 0; }
         #volume { font-size: 18px; margin: 10px 0; }
-        .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; font-family: monospace; }
+        .debug  { background: #f0f0f0; padding: 10px; margin: 10px 0; font-family: monospace; }
     </style>
 </head>
 <body>
     <h1>Baby Monitor</h1> 
     <img id="videoStream" width="640" alt="Loading video stream..."/>
 
+
+    <div>
+        <label for="thresholdSlider">
+            Threshold: <span id="thresholdValue">50</span>
+        </label>
+        <input type="range" id="thresholdSlider" min="0" max="100" value="50">
+    </div>
 
     <div id="volume">Volume: 0</div>
     <div id="status">Status: Ready</div>
@@ -424,16 +431,46 @@ class MainHandler(BaseHTTPRequestHandler):
             log(`Current page: ${currentHost}:${currentPort}`);
         }
 
-        const THRESHOLD = 50;
+
         let monitoring = false;
         let audioContext = null;
         let lastAlarmTime = 0;
+        let flashInterval = null;
         const ALARM_COOLDOWN = 2000;
         
         const alarm = document.getElementById('alarm');
         const status = document.getElementById('status');
         const debug = document.getElementById('debug');
-        
+
+    let THRESHOLD = 50; // default
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const thresholdValueDisplay = document.getElementById('thresholdValue');
+
+    thresholdSlider.addEventListener('input', () => {
+        THRESHOLD = parseInt(thresholdSlider.value, 10);
+        thresholdValueDisplay.textContent = THRESHOLD;
+    });
+
+
+    function startFlashing() {
+        if (flashInterval) return; // already flashing
+
+        let isRed = false;
+        flashInterval = setInterval(() => {
+            document.body.style.backgroundColor = isRed ? 'yellow' : 'red';
+            isRed = !isRed;
+        }, 300);
+    }
+
+    function stopFlashing() {
+        if (flashInterval) {
+            clearInterval(flashInterval);
+            flashInterval = null;
+        }
+        document.body.style.backgroundColor = ''; // reset
+    }
+
+
         function log(msg) {
             console.log(msg);
             //debug.innerHTML += msg + '<br>';
@@ -506,6 +543,7 @@ class MainHandler(BaseHTTPRequestHandler):
             }
             
             log('Attempting to play alarm...');
+            startFlashing(); //start background flashing
             
             try {
                 // Wait for audio to be ready
@@ -556,6 +594,7 @@ class MainHandler(BaseHTTPRequestHandler):
                 // Try generated beep as fallback
                 log('Trying generated beep fallback...');
                 generateBeep();
+                stopFlashing();
             }
         }
         
@@ -593,10 +632,10 @@ class MainHandler(BaseHTTPRequestHandler):
         });
         
         // Monitor audio loading
-        alarm.addEventListener('loadstart', () => log('Audio loading started'));
+        alarm.addEventListener('loadstart',  () => log('Audio loading started'));
         alarm.addEventListener('loadeddata', () => log('Audio data loaded'));
-        alarm.addEventListener('canplay', () => log('Audio can play'));
-        alarm.addEventListener('error', (e) => log(`Audio error event: ${e.message || 'Unknown error'}`));
+        alarm.addEventListener('canplay',    () => log('Audio can play'));
+        alarm.addEventListener('error',     (e) => log(`Audio error event: ${e.message || 'Unknown error'}`));
         
         // Volume monitoring loop
         setInterval(async () => {
@@ -604,7 +643,9 @@ class MainHandler(BaseHTTPRequestHandler):
             
             try {
                 const response = await fetch('/volume');
-                if (!response.ok) {
+                if (!response.ok) 
+                {
+                    stopFlashing();
                     throw new Error(`HTTP ${response.status}`);
                 }
                 
@@ -613,15 +654,21 @@ class MainHandler(BaseHTTPRequestHandler):
                 
                 document.getElementById('volume').textContent = `Volume: ${vol.toFixed(2)}`;
                 
-                if (vol > THRESHOLD) {
+                if (vol > THRESHOLD) 
+                {
                     await playAlarm();
-                } else if (status.textContent.includes('ALARM')) {
+                } else 
+                if (status.textContent.includes('ALARM')) 
+                {
                     status.textContent = 'Monitoring active';
+                    stopFlashing();
                 }
                 
-            } catch (error) {
+            } catch (error) 
+            {
                 console.error("Volume fetch failed:", error);
                 status.textContent = `Connection error: ${error.message}`;
+                stopFlashing();
             }
         }, 200);
         
