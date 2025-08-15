@@ -4,6 +4,7 @@ import cv2
 import json
 import threading
 import time
+from datetime import datetime
 import math
 import numpy as np
 import sounddevice as sd
@@ -28,6 +29,43 @@ def get_volume() -> float:
 # ---------------------------
 # Video overlay (volume bar)
 # ---------------------------
+
+def draw_datetime(frame: np.ndarray):
+    """
+    Renders the current date and time (up to seconds)
+    in the top-right corner of the image.
+    """
+    h, w = frame.shape[:2]
+
+    # Get formatted date/time string
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Choose font and scale
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.5
+    thickness = 1
+
+    # Determine text size
+    (text_w, text_h), baseline = cv2.getTextSize(timestamp, font, scale, thickness)
+
+    # Position: top-right with small margin
+    margin = max(10, w // 100)
+    x = w - text_w - margin
+    y = margin + text_h
+
+    # Draw semi-transparent background for readability
+    #overlay = frame.copy()
+    #cv2.rectangle(overlay, (x - 5, y - text_h - 5), (x + text_w + 5, y + baseline + 5), (0, 0, 0), thickness=-1)
+    #cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
+
+    # Draw text
+    offs=1
+    cv2.putText(frame, timestamp, (x+offs, y+offs), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+    cv2.putText(frame, timestamp, (x-offs, y-offs), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+    cv2.putText(frame, timestamp, (x-offs, y), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+    cv2.putText(frame, timestamp, (x+offs, y), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+    cv2.putText(frame, timestamp, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
 def draw_volume_bar(frame: np.ndarray, volume_pct: float):
     """
     Draws a vertical volume bar on the left side of the frame.
@@ -159,6 +197,7 @@ class ImageStreamHandler(BaseHTTPRequestHandler):
                 if not ret:
                     continue
                 draw_volume_bar(frame, get_volume())
+                draw_datetime(frame)
                 ret2, jpeg = cv2.imencode('.jpg', frame)
                 if not ret2:
                     continue
@@ -349,11 +388,13 @@ class MainHandler(BaseHTTPRequestHandler):
     </style>
 </head>
 <body>
-    <h1>Baby Monitor - DEBUG VERSION</h1>
-    <img src="http://192.168.1.2:8001/stream.mjpg" width="640"/>
+    <h1>Baby Monitor</h1> 
+    <img id="videoStream" width="640" alt="Loading video stream..."/>
+
+
     <div id="volume">Volume: 0</div>
     <div id="status">Status: Ready</div>
-    <div id="debug" class="debug">Debug info will appear here...</div>
+    <div id="debug" class="debug">Welcome, Click Start Monitor to begin Volume Monitoring...</div>
      
     <!-- Multiple audio elements for better browser support -->
     <audio id="alarm" preload="auto">
@@ -363,12 +404,26 @@ class MainHandler(BaseHTTPRequestHandler):
     </audio>
     
     <br>
-    <button id="playBtn">🔊 Test Alarm</button>
-    <button id="genBeepBtn">🎵 Generate Beep</button>
-    <button id="startBtn">▶️ Start Monitoring</button>
-    <button id="testFiles">🔍 Test Audio Files</button>
+    <button id="playBtn">Test Alarm</button>
+    <button id="genBeepBtn">Generate Beep</button>
+    <button id="startBtn">Start Monitoring</button>
+    <button id="testFiles">Test Audio Files</button>
 
     <script>
+
+        // Get current page's IP and construct stream URL
+        function setupVideoStream() {
+            const currentHost = window.location.hostname;
+            const currentPort = window.location.port;
+            const streamUrl = `http://${currentHost}:8001/stream.mjpg`;
+            
+            const videoImg = document.getElementById('videoStream');
+            videoImg.src = streamUrl;
+            
+            log(`Video stream URL: ${streamUrl}`);
+            log(`Current page: ${currentHost}:${currentPort}`);
+        }
+
         const THRESHOLD = 50;
         let monitoring = false;
         let audioContext = null;
@@ -381,23 +436,24 @@ class MainHandler(BaseHTTPRequestHandler):
         
         function log(msg) {
             console.log(msg);
-            debug.innerHTML += msg + '<br>';
+            //debug.innerHTML += msg + '<br>';
         }
+        
         
         // Initialize audio context
         async function initAudio() {
             try {
                 if (!audioContext) {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    log(`✅ AudioContext created, state: ${audioContext.state}`);
+                    log(`AudioContext created, state: ${audioContext.state}`);
                 }
                 if (audioContext.state === 'suspended') {
                     await audioContext.resume();
-                    log(`✅ AudioContext resumed, new state: ${audioContext.state}`);
+                    log(`AudioContext resumed, new state: ${audioContext.state}`);
                 }
                 return true;
             } catch (err) {
-                log(`❌ AudioContext failed: ${err.message}`);
+                log(`AudioContext failed: ${err.message}`);
                 return false;
             }
         }
@@ -420,7 +476,7 @@ class MainHandler(BaseHTTPRequestHandler):
             oscillator.start(audioContext.currentTime);
             oscillator.stop(audioContext.currentTime + 0.5);
             
-            log('🎵 Generated beep sound');
+            log('Generated beep sound');
         }
         
         // Test if audio files exist
@@ -431,12 +487,12 @@ class MainHandler(BaseHTTPRequestHandler):
                 try {
                     const response = await fetch(file, { method: 'GET' });
                     if (response.ok) {
-                        log(`✅ ${file} exists (${response.status})`);
+                        log(`${file} exists (${response.status})`);
                     } else {
-                        log(`❌ ${file} not found (${response.status})`);
+                        log(`${file} not found (${response.status})`);
                     }
                 } catch (err) {
-                    log(`❌ ${file} fetch failed: ${err.message}`);
+                    log(`${file} fetch failed: ${err.message}`);
                 }
             }
         }
@@ -445,21 +501,21 @@ class MainHandler(BaseHTTPRequestHandler):
         async function playAlarm() {
             const now = Date.now();
             if (now - lastAlarmTime < ALARM_COOLDOWN) {
-                log('⏱️ Alarm on cooldown');
+                log('Alarm on cooldown');
                 return;
             }
             
-            log('🚨 Attempting to play alarm...');
+            log('Attempting to play alarm...');
             
             try {
                 // Wait for audio to be ready
                 if (alarm.readyState < 2) { // HAVE_CURRENT_DATA = 2
-                    log(`⏳ Audio not ready (readyState: ${alarm.readyState}), waiting...`);
+                    log(`Audio not ready (readyState: ${alarm.readyState}), waiting...`);
                     
                     // Wait for canplay event or timeout
                     await new Promise((resolve, reject) => {
                         const timeout = setTimeout(() => {
-                            log('⏰ Audio load timeout, using generated beep');
+                            log('Audio load timeout, using generated beep');
                             generateBeep();
                             resolve();
                         }, 2000);
@@ -467,7 +523,7 @@ class MainHandler(BaseHTTPRequestHandler):
                         const onCanPlay = () => {
                             clearTimeout(timeout);
                             alarm.removeEventListener('canplay', onCanPlay);
-                            log(`✅ Audio ready! (readyState: ${alarm.readyState})`);
+                            log(`Audio ready! (readyState: ${alarm.readyState})`);
                             resolve();
                         };
                         
@@ -478,68 +534,69 @@ class MainHandler(BaseHTTPRequestHandler):
                 
                 // Reset and play
                 alarm.currentTime = 0;
-                log(`📍 Audio currentTime reset to: ${alarm.currentTime}`);
-                log(`📍 Audio readyState: ${alarm.readyState}`);
-                log(`📍 Audio paused: ${alarm.paused}`);
+                log(`Audio currentTime reset to: ${alarm.currentTime}`);
+                log(`Audio readyState: ${alarm.readyState}`);
+                log(`Audio paused: ${alarm.paused}`);
                 
                 if (alarm.readyState >= 2) {
                     const playPromise = alarm.play();
                     await playPromise;
                     
-                    log('✅ Alarm playing successfully!');
-                    status.textContent = '🚨 ALARM PLAYING';
+                    log('Alarm playing successfully!');
+                    status.textContent = 'ALARM PLAYING';
                     lastAlarmTime = now;
                 } else {
                     throw new Error('Audio still not ready after waiting');
                 }
                 
             } catch (err) {
-                log(`❌ Alarm play failed: ${err.name} - ${err.message}`);
-                status.textContent = `❌ Audio Error: ${err.message}`;
+                log(`Alarm play failed: ${err.name} - ${err.message}`);
+                status.textContent = `Audio Error: ${err.message}`;
                 
                 // Try generated beep as fallback
-                log('🔄 Trying generated beep fallback...');
+                log('Trying generated beep fallback...');
                 generateBeep();
             }
         }
         
         // Event listeners
         document.getElementById('playBtn').addEventListener('click', async () => {
-            log('🖱️ Test button clicked');
+            log('Test button clicked');
             await initAudio();
             await playAlarm();
         });
         
         document.getElementById('genBeepBtn').addEventListener('click', async () => {
-            log('🖱️ Generate beep clicked');
+            log('Generate beep clicked');
             await initAudio();
             generateBeep();
         });
         
         document.getElementById('testFiles').addEventListener('click', async () => {
-            log('🖱️ Test files clicked');
+            log('Test files clicked');
             await testAudioFiles();
         });
         
         document.getElementById('startBtn').addEventListener('click', async () => {
-            log('🖱️ Start monitoring clicked');
+            log('Start monitoring clicked');
             const audioReady = await initAudio();
             if (!audioReady) {
-                status.textContent = '❌ Audio initialization failed';
+                status.textContent = 'Audio initialization failed';
                 return;
             }
             
             monitoring = true;
             document.getElementById('startBtn').style.display = 'none';
-            status.textContent = '👂 Monitoring active';
-            log('✅ Monitoring started');
+            status.textContent = 'Monitoring active';
+            debug.innerHTML = '<br>';
+            log('Monitoring started');
         });
         
         // Monitor audio loading
-        alarm.addEventListener('loadstart', () => log('📥 Audio loading started'));
-        alarm.addEventListener('loadeddata', () => log('✅ Audio data loaded'));
-        alarm.addEventListener('canplay', () => log('✅ Audio can play'));
-        alarm.addEventListener('error', (e) => log(`❌ Audio error event: ${e.message || 'Unknown error'}`));
+        alarm.addEventListener('loadstart', () => log('Audio loading started'));
+        alarm.addEventListener('loadeddata', () => log('Audio data loaded'));
+        alarm.addEventListener('canplay', () => log('Audio can play'));
+        alarm.addEventListener('error', (e) => log(`Audio error event: ${e.message || 'Unknown error'}`));
         
         // Volume monitoring loop
         setInterval(async () => {
@@ -559,18 +616,19 @@ class MainHandler(BaseHTTPRequestHandler):
                 if (vol > THRESHOLD) {
                     await playAlarm();
                 } else if (status.textContent.includes('ALARM')) {
-                    status.textContent = '👂 Monitoring active';
+                    status.textContent = 'Monitoring active';
                 }
                 
             } catch (error) {
                 console.error("Volume fetch failed:", error);
-                status.textContent = `❌ Connection error: ${error.message}`;
+                status.textContent = `Connection error: ${error.message}`;
             }
         }, 200);
         
         // Initial file test
         window.addEventListener('load', () => {
-            log('🚀 Page loaded, testing audio files...');
+            log('Page loaded, testing audio files...');
+            setupVideoStream(); // Set up dynamic video URL
             testAudioFiles();
         });
     </script>
