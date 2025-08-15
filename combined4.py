@@ -322,6 +322,7 @@ class MainHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload.encode('utf-8'))
 
+#----------------------------------------------------------
  def handle_audio(self):
         try:
             with open("audio.mp3", "rb") as f:
@@ -349,7 +350,7 @@ class MainHandler(BaseHTTPRequestHandler):
 </head>
 <body>
     <h1>Baby Monitor - DEBUG VERSION</h1>
-    <img src="http://localhost:8001/stream.mjpg" width="640"/>
+    <img src="http://192.168.1.2:8001/stream.mjpg" width="640"/>
     <div id="volume">Volume: 0</div>
     <div id="status">Status: Ready</div>
     <div id="debug" class="debug">Debug info will appear here...</div>
