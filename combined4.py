@@ -398,8 +398,10 @@ class MainHandler(BaseHTTPRequestHandler):
     </style>
 </head>
 <body>
+ <div>
+<center>
     <h1>Baby Monitor</h1> 
-    <img id="videoStream" width="640" alt="Loading video stream..."/>
+    <img id="videoStream" height="90%" alt="Loading video stream..."/>
 
 
     <div>
@@ -425,7 +427,8 @@ class MainHandler(BaseHTTPRequestHandler):
     <button id="genBeepBtn">Generate Beep</button>
     <button id="startBtn">Start Monitoring</button>
     <button id="testFiles">Test Audio Files</button>
-
+</center>
+</div>
     <script>
 
         // Get current page's IP and construct stream URL
