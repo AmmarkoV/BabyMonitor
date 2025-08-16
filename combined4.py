@@ -3,6 +3,7 @@ import sys
 import cv2
 import json
 import threading
+import subprocess
 import time
 from datetime import datetime
 import math
@@ -25,11 +26,9 @@ def get_volume() -> float:
     with _vol_lock:
         return _current_volume_pct
 
- 
 # ---------------------------
 # Video overlay (volume bar)
 # ---------------------------
-
 def draw_datetime(frame: np.ndarray):
     """
     Renders the current date and time (up to seconds)
@@ -430,11 +429,46 @@ class MainHandler(BaseHTTPRequestHandler):
 <html>
 <head>
     <style>
-        body    { font-family: Arial, sans-serif; margin: 20px; }
-        button  { padding: 10px 20px; margin: 10px; font-size: 16px; }
-        #status { font-weight: bold; margin: 10px 0; }
-        #volume { font-size: 18px; margin: 10px 0; }
-        .debug  { background: #f0f0f0; padding: 10px; margin: 10px 0; font-family: monospace; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: black;   /* background set to black */
+            color: white;              /* all text white */
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            background-color: #222;    /* dark gray button background */
+            color: white;              /* white button text */
+            border: 1px solid #555;    /* subtle border */
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #444;    /* lighter on hover */
+        }
+
+        #status { 
+            font-weight: bold; 
+            margin: 10px 0; 
+        }
+
+        #volume { 
+            font-size: 18px; 
+            margin: 10px 0; 
+        }
+
+        .debug  { 
+            background: #222;          /* darker debug box */
+            color: #0f0;              /* green monospace text for contrast */
+            padding: 10px; 
+            margin: 10px 0; 
+            font-family: monospace; 
+            border-radius: 4px;
+        } 
     </style>
 </head>
 <body>
