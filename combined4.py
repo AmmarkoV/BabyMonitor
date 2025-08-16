@@ -181,7 +181,7 @@ class ImageStreamHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404, "Not Found")
 
-    def handle_image_stream(self):
+    def handle_image_stream(self, width=640, height=480, framerate=10):
         self.send_response(200)
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
         self.end_headers()
@@ -190,6 +190,15 @@ class ImageStreamHandler(BaseHTTPRequestHandler):
         if not cap.isOpened():
             print("Failed to open camera")
             return
+
+
+        # Apply requested width & height
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+        # Compute frame interval from framerate
+        frame_interval = 1.0 / framerate
+
 
         try:
             while True:
@@ -207,7 +216,8 @@ class ImageStreamHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(jpeg.tobytes())
                 self.wfile.write(b'\r\n')
-                time.sleep(0.03)
+
+                time.sleep(frame_interval)
         except Exception as e:
             print("Image stream stopped:", e)
         finally:
@@ -442,7 +452,7 @@ class MainHandler(BaseHTTPRequestHandler):
         const status = document.getElementById('status');
         const debug = document.getElementById('debug');
 
-    let THRESHOLD = 50; // default
+    let THRESHOLD = 30; // default
     const thresholdSlider = document.getElementById('thresholdSlider');
     const thresholdValueDisplay = document.getElementById('thresholdValue');
 
