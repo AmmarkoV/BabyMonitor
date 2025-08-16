@@ -223,6 +223,46 @@ class ImageStreamHandler(BaseHTTPRequestHandler):
         finally:
             cap.release()
 
+
+
+# ---------------------------
+# Audio stream server
+# ---------------------------
+class AudioStreamHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/audio.mp3":
+            self.handle_audio_stream()
+        else:
+            self.send_error(404, "Not Found")
+
+    def handle_audio_stream(self, width=640, height=480, framerate=10):
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/mpeg')
+            self.end_headers()
+
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-f', 'pulse',       # or 'pulse' or whatever your audio input is
+                '-i', 'default',    # adjust if necessary
+                '-f', 'mp3',
+                '-codec:a', 'libmp3lame',
+                '-b:a', '128k',
+                '-'
+            ]
+            ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+            try:
+                while True:
+                    data = ffmpeg_proc.stdout.read(1024)
+                    if not data:
+                        break
+                    self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                print("Client disconnected from audio stream")
+            finally:
+                ffmpeg_proc.terminate()
+
+
 # ---------------------------
 # Main server (volume + audio + HTML)
 # ---------------------------
@@ -340,6 +380,7 @@ class MainHandler(BaseHTTPRequestHandler):
     self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
     self.send_header("Access-Control-Allow-Headers", "Range")
     self.end_headers()
+#----------------------------------------------------------
 
  # Updated simplified handlers
  def handle_ogg(self):
@@ -350,7 +391,7 @@ class MainHandler(BaseHTTPRequestHandler):
 
  def handle_wav(self):
     self.handle_audio_file("beep_short.wav", "audio/wav")
-
+#----------------------------------------------------------
  # Add HEAD method support for audio files
  def do_HEAD(self):
     if self.path == "/beep_short.ogg":
@@ -370,7 +411,6 @@ class MainHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(payload)))
         self.end_headers()
         self.wfile.write(payload.encode('utf-8'))
-
 #----------------------------------------------------------
  def handle_audio(self):
         try:
@@ -427,6 +467,13 @@ class MainHandler(BaseHTTPRequestHandler):
     <button id="genBeepBtn">Generate Beep</button>
     <button id="startBtn">Start Monitoring</button>
     <button id="testFiles">Test Audio Files</button>
+
+  <br>
+  <audio controls autoplay>
+    <source id="audioStream" type="audio/mpeg" />
+    Your browser does not support the audio element.
+  </audio>
+
 </center>
 </div>
     <script>
@@ -443,6 +490,20 @@ class MainHandler(BaseHTTPRequestHandler):
             log(`Video stream URL: ${streamUrl}`);
             log(`Current page: ${currentHost}:${currentPort}`);
         }
+
+
+        function setupAudioStream() {
+            const currentHost = window.location.hostname;
+            const currentPort = window.location.port;
+            const streamUrl = `http://${currentHost}:8002/audio.mp3`;
+            
+            const audioTag = document.getElementById('audioStream');
+            audioTag.src = streamUrl;
+            
+            log(`Audio stream URL: ${streamUrl}`);
+            log(`Current page: ${currentHost}:${currentPort}`);
+        }
+
 
 
         let monitoring = false;
@@ -689,6 +750,7 @@ class MainHandler(BaseHTTPRequestHandler):
         window.addEventListener('load', () => {
             log('Page loaded, testing audio files...');
             setupVideoStream(); // Set up dynamic video URL
+            setupAudioStream();
             testAudioFiles();
         });
     </script>
@@ -710,6 +772,12 @@ def run_image_server(host='0.0.0.0', port=8001):
     print(f"Image server running at http://{host}:{port}/stream.mjpg")
     server.serve_forever()
 
+def run_audio_server(host='0.0.0.0', port=8002):
+    server = HTTPServer((host, port), AudioStreamHandler)
+    print(f"Image server running at http://{host}:{port}/audio.mp3")
+    server.serve_forever()
+
+
 def run_main_server(host='0.0.0.0', port=8080):
     server = HTTPServer((host, port), MainHandler)
     print(f"Main server running at http://{host}:{port}")
@@ -718,5 +786,6 @@ def run_main_server(host='0.0.0.0', port=8080):
 if __name__ == "__main__":
     start_audio_volume_monitor()
     threading.Thread(target=run_image_server, daemon=True).start()
+    threading.Thread(target=run_audio_server, daemon=True).start()
     run_main_server()
 
