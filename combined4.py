@@ -471,7 +471,7 @@ class MainHandler(BaseHTTPRequestHandler):
         } 
     </style>
 </head>
-<body>
+<body><center>
  <div>
 <center>
     <h1>Baby Monitor</h1> 
@@ -788,6 +788,7 @@ class MainHandler(BaseHTTPRequestHandler):
             testAudioFiles();
         });
     </script>
+</center>
 </body>
 </html>
         """
