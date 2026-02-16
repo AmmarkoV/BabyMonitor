@@ -607,6 +607,9 @@ if __name__ == "__main__":
     #VIDEO_DEVICE = args.video_device
     VIDEO_DEVICE = resolve_video_device(args.video_device)
 
+    os.system("v4l2-ctl -d %s --list-ctrls" % args.video_device)
+    #os.system("v4l2-ctl -d %s -c exposure=220" % args.video_device)
+
     MAIN_PORT = int(args.port)
     IMAGE_PORT = MAIN_PORT + 1
     HOST = args.host
