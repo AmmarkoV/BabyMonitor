@@ -258,4 +258,4 @@ Ideas for future work:
 
 # License
 
-MIT License
+GPL3 License
