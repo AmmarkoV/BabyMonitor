@@ -11,14 +11,12 @@ import sounddevice as sd
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import argparse
 import hashlib
-import glob
-
 
 # ---------------------------
 # Globals
 # ---------------------------
-_current_volume_pct = 0.0  # 0..100 mapped from mic RMS (dBFS)
-_vol_lock = threading.Lock()
+_current_volume_pct = 0.0  # 0..100 mapped from mic RMS (dBFS)                                                                                                              
+_vol_lock = threading.Lock()                                                                                                                                                
 
 VIDEO_DEVICE = "/dev/video0"
 MAIN_PORT = 8080
@@ -33,38 +31,6 @@ def set_volume(v: float):
 def get_volume() -> float:
     with _vol_lock:
         return _current_volume_pct
-
-
-def resolve_video_device(user_value: str) -> str:
-    """
-    Accepts:
-      - direct device path (/dev/video2, /dev/v4l/by-id/..., /dev/v4l/by-path/...)
-      - a substring to match in /dev/v4l/by-id or /dev/v4l/by-path
-    Returns a usable device path (prefers by-id/by-path symlinks).
-    """
-    # If they gave a path that exists, use it.
-    if user_value.startswith("/dev/") and os.path.exists(user_value):
-        return user_value
-
-    # Search stable symlink dirs for substring match
-    candidates = []
-    for base in ("/dev/v4l/by-id", "/dev/v4l/by-path"):
-        for p in sorted(glob.glob(os.path.join(base, "*"))):
-            name = os.path.basename(p)
-            if user_value.lower() in name.lower():
-                candidates.append(p)
-
-    if not candidates:
-        raise SystemExit(
-            f"Could not resolve camera '{user_value}'.\n"
-            f"Try one of these:\n"
-            f"  ls -l /dev/v4l/by-id/\n"
-            f"  ls -l /dev/v4l/by-path/\n"
-        )
-
-    # Prefer video-index0 if present
-    candidates.sort(key=lambda x: ("video-index0" not in x, x))
-    return candidates[0]
 
 
 # ---------------------------
@@ -593,23 +559,17 @@ def run_main_server(host: str, port: int):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Multi-instance baby monitor stream server")
-    #p.add_argument("video_device", help="Video device path (e.g. /dev/video0)")
+    p.add_argument("video_device", help="Video device path (e.g. /dev/video0)")
     p.add_argument("port", type=int, help="Starting port for MAIN server (MJPEG server uses port+1)")
     p.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     p.add_argument("--no-audio", action="store_true", help="Disable microphone monitoring")
-    p.add_argument("video_device", help="Device path OR substring match for /dev/v4l/by-id (e.g. 'Playstation Eye')")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    #VIDEO_DEVICE = args.video_device
-    VIDEO_DEVICE = resolve_video_device(args.video_device)
-
-    os.system("v4l2-ctl -d %s --list-ctrls" % args.video_device)
-    #os.system("v4l2-ctl -d %s -c exposure=220" % args.video_device)
-
+    VIDEO_DEVICE = args.video_device
     MAIN_PORT = int(args.port)
     IMAGE_PORT = MAIN_PORT + 1
     HOST = args.host
