@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import cv2
 import json
 import threading
@@ -11,6 +12,7 @@ import sounddevice as sd
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import argparse
 import hashlib
+from typing import Optional
 
 # ---------------------------
 # Globals
@@ -31,6 +33,165 @@ def set_volume(v: float):
 def get_volume() -> float:
     with _vol_lock:
         return _current_volume_pct
+
+
+
+# ---------------------------
+# Video overlay
+# ---------------------------
+
+def get_video_to_usb_suffix_map():
+    """
+    Parse `v4l2-ctl --list-devices` into:
+        {"/dev/video0": "1.1", "/dev/video1": "1.4", ...}
+    """
+    import re
+    import subprocess
+
+    mapping = {}
+
+    try:
+        out = subprocess.check_output(
+            ["v4l2-ctl", "--list-devices"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        print(f"[AUDIO-DEBUG] v4l2-ctl failed: {e}")
+        return mapping
+
+    current_suffix = None
+
+    for raw_line in out.splitlines():
+        line = raw_line.rstrip()
+
+        # Header example:
+        # USB Camera-B4.09.24.1 (usb-0000:01:00.0-1.1):
+        m = re.search(r"\(usb-[^)]+-([0-9]+(?:\.[0-9]+)*)\):\s*$", line)
+        if m:
+            current_suffix = m.group(1)
+            print(f"[AUDIO-DEBUG] found USB suffix header: {current_suffix} from line: {line}")
+            continue
+
+        # Device example:
+        #         /dev/video0
+        m = re.match(r"\s*(/dev/video\d+)\s*$", line)
+        if m and current_suffix:
+            mapping[m.group(1)] = current_suffix
+            print(f"[AUDIO-DEBUG] mapped {m.group(1)} -> {current_suffix}")
+
+    print(f"[AUDIO-DEBUG] final video->usb map: {mapping}")
+    return mapping
+
+def get_video_usb_port_suffix(video_device: str):
+    mapping = get_video_to_usb_suffix_map()
+    return mapping.get(video_device)
+
+def get_alsa_cards():
+    cards = []
+    with open("/proc/asound/cards", "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    i = 0
+    while i < len(lines):
+        m = re.match(r"\s*(\d+)\s+\[(.*?)\s*\]:\s*(.*)", lines[i])
+        if m:
+            card_num = int(m.group(1))
+            block = lines[i]
+            if i + 1 < len(lines):
+                block += lines[i + 1]
+            cards.append((card_num, block))
+            i += 2
+        else:
+            i += 1
+    return cards
+
+
+def find_audio_card_for_video(video_device: str) -> Optional[int]:
+    suffix = get_video_usb_port_suffix(video_device)
+    print(f"[AUDIO-DEBUG] video_device={video_device} usb_suffix={suffix}")
+
+    if not suffix:
+        return None
+
+    for card_num, text in get_alsa_cards():
+        print(f"[AUDIO-DEBUG] ALSA card {card_num}: {text.strip()}")
+        if f"-{suffix}" in text:
+            return card_num
+
+    return None
+
+
+def find_portaudio_device_for_alsa_card(card_num: int):
+    """
+    Map USB camera ALSA card number to a unique PortAudio input device index.
+    Assumes the USB camera input devices appear in the same relative order as ALSA cards.
+    """
+    devices = sd.query_devices()
+
+    # Keep only input-capable USB camera audio devices
+    pa_matches = []
+    for idx, dev in enumerate(devices):
+        try:
+            name = dev["name"]
+            if dev["max_input_channels"] > 0 and "USB Camera-B4.09.24.1" in name:
+                pa_matches.append(idx)
+                print(f"[AUDIO-DEBUG] PA candidate idx={idx} name={name}")
+        except Exception:
+            pass
+
+    pa_matches = sorted(pa_matches)
+
+    # Keep only ALSA USB camera cards
+    usb_camera_cards = []
+    for n, text in get_alsa_cards():
+        if "USB Camera-B4.09.24.1" in text:
+            usb_camera_cards.append(n)
+
+    usb_camera_cards = sorted(usb_camera_cards)
+
+    print(f"[AUDIO-DEBUG] USB camera ALSA cards: {usb_camera_cards}")
+    print(f"[AUDIO-DEBUG] USB camera PortAudio devices: {pa_matches}")
+
+    if not pa_matches:
+        return None
+
+    if card_num in usb_camera_cards:
+        pos = usb_camera_cards.index(card_num)
+        if pos < len(pa_matches):
+            return pa_matches[pos]
+
+    return None
+
+
+def choose_working_samplerate(device, candidates=(48000, 44100, 16000), channels=1) -> Optional[int]:
+    for rate in candidates:
+        try:
+            sd.check_input_settings(device=device, samplerate=rate, channels=channels)
+            return rate
+        except Exception:
+            pass
+    return None
+
+
+def resolve_audio_for_video(video_device: str):
+    card_num = find_audio_card_for_video(video_device)
+    if card_num is None:
+        raise RuntimeError(f"Could not find ALSA card for {video_device}")
+
+    pa_device = find_portaudio_device_for_alsa_card(card_num)
+    if pa_device is None:
+        raise RuntimeError(
+            f"Could not find PortAudio input device for ALSA card {card_num} ({video_device})"
+        )
+
+    rate = choose_working_samplerate(pa_device)
+    if rate is None:
+        raise RuntimeError(
+            f"No supported sample rate found for PortAudio device {pa_device} (ALSA card {card_num})"
+        )
+
+    return pa_device, rate, card_num
 
 
 # ---------------------------
@@ -101,38 +262,64 @@ def start_audio_volume_monitor(
     device=None,
     smoothing: float = 0.85,
     floor_db: float = -60.0,
-    ceil_db: float = 0.0
+    ceil_db: float = 0.0,
+    video_device: Optional[str] = None
 ):
-    def dbfs_from_block(indata: np.ndarray) -> float:
-        eps = 1e-12
-        rms = math.sqrt(float(np.mean(np.square(indata), dtype=np.float64)) + eps)
-        db = 20.0 * math.log10(max(rms, eps))
-        return db
+    def dbfs_from_block(indata):
+        rms = np.sqrt(np.mean(np.square(indata), axis=0))[0]
+        if rms <= 1e-12:
+            return -120.0
+        return 20.0 * np.log10(rms)
 
-    def map_db_to_pct(db: float) -> float:
-        pct = (db - floor_db) / (ceil_db - floor_db) * 100.0
-        return max(0.0, min(100.0, pct))
+    def map_db_to_pct(db):
+        x = (db - floor_db) / (ceil_db - floor_db)
+        x = max(0.0, min(1.0, x))
+        return 100.0 * x
 
     def thread_target():
         ema = 0.0
+        local_device = device
+        local_samplerate = samplerate
+        local_card_num = None
+
+        try:
+            if local_device is None:
+                if not video_device:
+                    raise RuntimeError("No audio device specified and no video_device provided")
+                local_device, local_samplerate, local_card_num = resolve_audio_for_video(video_device)
+
+            print(
+                f"[AUDIO] video={video_device} "
+                f"alsa_card={local_card_num} "
+                f"portaudio_device={local_device} "
+                f"samplerate={local_samplerate}"
+            )
+        except Exception as e:
+            print(f"[AUDIO] Failed to resolve input device for {video_device}: {e}")
+            return
 
         def callback(indata, frames, time_info, status):
             nonlocal ema
             if status:
-                pass
+                print(f"[AUDIO] status for {video_device}: {status}")
             db = dbfs_from_block(indata)
             pct = map_db_to_pct(db)
             ema = smoothing * ema + (1.0 - smoothing) * pct
             set_volume(ema)
 
-        with sd.InputStream(samplerate=samplerate,
-                            blocksize=blocksize,
-                            channels=1,
-                            dtype='float32',
-                            device=device,
-                            callback=callback):
-            while True:
-                time.sleep(0.25)
+        try:
+            with sd.InputStream(
+                samplerate=local_samplerate,
+                blocksize=blocksize,
+                channels=1,
+                dtype='float32',
+                device=local_device,
+                callback=callback
+            ):
+                while True:
+                    time.sleep(0.25)
+        except Exception as e:
+            print(f"[AUDIO] Failed to open stream for {video_device}: {e}")
 
     t = threading.Thread(target=thread_target, daemon=True)
     t.start()
@@ -562,6 +749,10 @@ def parse_args():
     p.add_argument("video_device", help="Video device path (e.g. /dev/video0)")
     p.add_argument("port", type=int, help="Starting port for MAIN server (MJPEG server uses port+1)")
     p.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    p.add_argument("--audio-device", type=int, default=None,
+                   help="Explicit PortAudio input device index (default: auto-resolve from video device)")
+    p.add_argument("--samplerate", type=int, default=None,
+                   help="Explicit audio sample rate (default: auto-probe from device)")
     p.add_argument("--no-audio", action="store_true", help="Disable microphone monitoring")
     return p.parse_args()
 
@@ -575,7 +766,11 @@ if __name__ == "__main__":
     HOST = args.host
 
     if not args.no_audio:
-        start_audio_volume_monitor()
+        start_audio_volume_monitor(
+                                    samplerate=args.samplerate if args.samplerate is not None else 16000,
+                                    device=args.audio_device,
+                                    video_device=VIDEO_DEVICE,
+                                  )
 
     threading.Thread(target=run_image_server, args=(HOST, IMAGE_PORT), daemon=True).start()
     run_main_server(HOST, MAIN_PORT)
