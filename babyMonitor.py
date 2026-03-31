@@ -540,7 +540,7 @@ class MainHandler(BaseHTTPRequestHandler):
             log(`Video stream URL: ${{streamUrl}}`);
         }}
 
-        const THRESHOLD = 30;
+        const THRESHOLD = 23;
         let monitoring = false;
         let audioContext = null;
         let lastAlarmTime = 0;
