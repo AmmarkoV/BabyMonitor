@@ -504,6 +504,9 @@ class MainHandler(BaseHTTPRequestHandler):
         #status {{ font-weight: bold; margin: 10px 0; }}
         #volume {{ font-size: 18px; margin: 10px 0; }}
         .debug  {{ background: #f0f0f0; padding: 10px; margin: 10px 0; font-family: monospace; }}
+        .threshold-ctrl {{ margin: 10px 0; font-size: 16px; }}
+        .threshold-ctrl input[type=range] {{ width: 200px; vertical-align: middle; }}
+        .threshold-ctrl input[type=number] {{ width: 60px; font-size: 16px; vertical-align: middle; }}
     </style>
 </head>
 <body>
@@ -516,6 +519,11 @@ class MainHandler(BaseHTTPRequestHandler):
     <img id="videoStream" width="70%" alt="Loading video stream..."/>
 
     <div id="volume">Volume: 0</div>
+    <div class="threshold-ctrl">
+        Alarm Threshold:
+        <input type="range" id="thresholdSlider" min="0" max="100" value="23">
+        <input type="number" id="thresholdNum" min="0" max="100" value="23">
+    </div>
     <div id="status">Status: Ready</div>
     <div id="debug" class="debug">Welcome, Click Start Monitor to begin Volume Monitoring...</div>
 
@@ -540,7 +548,7 @@ class MainHandler(BaseHTTPRequestHandler):
             log(`Video stream URL: ${{streamUrl}}`);
         }}
 
-        const THRESHOLD = 23;
+        let THRESHOLD = 23;
         let monitoring = false;
         let audioContext = null;
         let lastAlarmTime = 0;
@@ -686,6 +694,22 @@ class MainHandler(BaseHTTPRequestHandler):
             document.getElementById('startBtn').style.display = 'none';
             status.textContent = 'Monitoring active';
             debug.innerHTML = '<br>';
+        }});
+
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const thresholdNum    = document.getElementById('thresholdNum');
+
+        thresholdSlider.addEventListener('input', () => {{
+            THRESHOLD = parseFloat(thresholdSlider.value);
+            thresholdNum.value = THRESHOLD;
+        }});
+
+        thresholdNum.addEventListener('input', () => {{
+            const v = parseFloat(thresholdNum.value);
+            if (!isNaN(v) && v >= 0 && v <= 100) {{
+                THRESHOLD = v;
+                thresholdSlider.value = v;
+            }}
         }});
 
         alarm.addEventListener('loadstart',  () => log('Audio loading started'));
