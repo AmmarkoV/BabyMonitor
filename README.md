@@ -1,261 +1,177 @@
-# Simple Baby Monitor --- Intended for Raspberry Pi SBC
+# 🍼 Baby Monitor — DIY Raspberry Pi Baby Monitor
 
-A lightweight **DIY baby monitor system** designed to run on **Raspberry
-Pi 4 or newer**, using Python, OpenCV, and a web browser.
+> Lightweight, browser-based baby monitor for Raspberry Pi. Streams live video from USB webcams, monitors microphone volume, and sounds an alarm when the baby wakes up — no apps, no cloud, no subscriptions.
 
-It streams video from one or more webcams, monitors microphone volume,
-and triggers an alarm when sound exceeds a threshold.\
-A small web portal allows viewing **one or two monitors
-simultaneously**.
+---
 
-The system is designed to run **continuously on a Raspberry Pi**,
-allowing parents to monitor a baby's room from any device on the local
-network.
+## Features
 
-------------------------------------------------------------------------
+| Feature | Details |
+|---|---|
+| 📷 Live video streaming | MJPEG stream from any `/dev/video*` device |
+| 🎤 Microphone monitoring | Real-time RMS volume analysis via `sounddevice` |
+| 🚨 Audio alarm | Triggers when volume exceeds a configurable threshold |
+| 📊 On-screen overlay | Timestamp + live volume bar drawn on every frame |
+| 🌐 Browser interface | Works on any phone, tablet, or laptop — no install |
+| 🖥 Multi-camera portal | View two cameras side-by-side in one page |
+| 🔊 Built-in beep fallback | WebAudio beep generated in-browser if no audio file found |
+| 🔌 USB device mapping | Auto-maps cameras to their USB port suffix via `v4l2-ctl` |
 
-# Features
+---
 
--   📷 **Live video streaming** from `/dev/video*` devices using MJPEG
--   🎤 **Microphone monitoring** with real-time volume analysis
--   🚨 **Audio alarm trigger** when noise exceeds threshold
--   📅 **Timestamp overlay** on video frames
--   📊 **Live volume meter overlay** on the video stream
--   🌐 **Browser-based interface** (no apps required)
--   🖥 **Dual monitor portal** to view multiple cameras
--   🔄 Frame reload and swap functionality
--   🔊 Built-in fallback beep generator if audio playback fails
+## How It Works
 
-------------------------------------------------------------------------
+```
+USB Camera(s) ──► babyMonitor.py ──► MJPEG stream  ─┐
+USB Microphone ──► babyMonitor.py ──► volume alarm   │
+                                                      ▼
+                                               portal.py
+                                                      │
+                                                      ▼
+                                         Browser Dashboard
+                                    (phone / tablet / laptop)
+```
 
-# Designed For Raspberry Pi
+Each `babyMonitor.py` instance handles one camera and one microphone. The `portal.py` server aggregates multiple monitors into a single dashboard page.
 
-This project is specifically intended for **Raspberry Pi 4 or newer**.
+---
 
-Typical setup:
+## Requirements
 
-    Raspberry Pi 4
-    ├── USB Camera 1
-    ├── USB Camera 2 (optional)
-    ├── USB Microphone
-    └── WiFi / Ethernet
+- **Hardware:** Raspberry Pi 4 or newer, USB webcam(s), USB microphone
+- **OS:** Raspberry Pi OS 64-bit (or any Linux)
+- **Python:** 3.9+
 
-The Raspberry Pi acts as the **monitor server**, while phones, tablets,
-or laptops connect through a web browser.
+Install Python dependencies:
 
-Recommended:
-
--   Raspberry Pi 4 / 5
--   Raspberry Pi OS (64‑bit)
--   USB webcam(s)
--   USB microphone
-
-------------------------------------------------------------------------
-
-# System Architecture
-
-    Camera 0 ── babyMonitor.py ──> Video Stream (MJPEG)
-    Camera 1 ── babyMonitor.py ──> Video Stream (MJPEG)
-
-                    ↓
-                 portal.py
-                    ↓
-              Browser Dashboard
-
-Each camera runs its own monitor server, while the **portal aggregates
-multiple monitors** into one page.
-
-------------------------------------------------------------------------
-
-# Requirements
-
-Linux system (Raspberry Pi OS recommended).
-
-Install dependencies:
-
-``` bash
+```bash
+pip install -r requirements.txt
+# or manually:
 pip install opencv-python numpy sounddevice
 ```
 
-Python 3.9+ recommended.
+`v4l2-ctl` is used for USB port mapping (optional, already on Raspberry Pi OS):
 
-------------------------------------------------------------------------
+```bash
+sudo apt install v4l-utils
+```
 
-# Running a Single Monitor
+---
 
-Start a monitor instance:
+## Quick Start
 
-``` bash
+### 1. Single camera
+
+```bash
 python3 babyMonitor.py /dev/video0 8080
 ```
 
-This starts:
+Opens two ports:
 
-    Main UI:
-    http://localhost:8080
+| URL | Purpose |
+|---|---|
+| `http://<pi-ip>:8080` | Monitor UI (alarm status, volume meter) |
+| `http://<pi-ip>:8081/stream.mjpg` | Raw MJPEG video stream |
 
-    Video stream:
-    http://localhost:8081/stream.mjpg
+### 2. Two cameras + portal
 
-------------------------------------------------------------------------
-
-# Running Multiple Cameras
-
-Each monitor instance uses **two ports**:
-
-    main_port
-    main_port + 1  (video stream)
-
-Example:
-
-    Camera 0 → ports 8090 / 8091
-    Camera 1 → ports 8093 / 8094
-
-Start them like:
-
-``` bash
-python3 babyMonitor.py /dev/video0 8090
-python3 babyMonitor.py /dev/video1 8093
-```
-
-------------------------------------------------------------------------
-
-# Web Portal (Multi Monitor View)
-
-Run the portal server:
-
-``` bash
+```bash
+python3 babyMonitor.py /dev/video0 8090 &
+python3 babyMonitor.py /dev/video1 8093 &
 python3 portal.py --ip 192.168.1.12 -p 8080 -d 8090 -d 8093
 ```
 
-Options:
+Portal options:
 
-    --ip            Device IP hosting monitors
-    -p              Portal port
-    -d              Monitor ports (repeatable)
+```
+--ip   IP address of the Raspberry Pi
+-p     Portal port (default: 8080)
+-d     Monitor port to include (repeat for each camera)
+```
 
-Example portal URL:
+Then open `http://192.168.1.12:8080` from any browser on your network.
 
-    http://192.168.1.12:8080
+### 3. Autostart on boot
 
-Portal features:
+Edit `startup.sh` with your Pi's IP and camera ports, then:
 
--   Dual monitor layout
--   Swap camera views
--   Reload streams
-
-------------------------------------------------------------------------
-
-# Automatic Startup Script
-
-Example launcher:
-
-``` bash
+```bash
+chmod +x startup.sh
 ./startup.sh
 ```
 
-Example:
+To run at boot, add it to `/etc/rc.local` or create a `systemd` service.
 
-``` bash
-python3 babyMonitor.py /dev/video0 8090 &
-python3 babyMonitor.py /dev/video1 8093
+---
 
-python3 portal.py --ip 192.168.1.12 -p 8080 -d 8090 -d 8093
+## Alarm System
+
+The monitor samples the microphone continuously. When volume exceeds the threshold (default **30%**), it:
+
+- Plays `beep_short.wav` / `.mp3` / `.ogg` (first one found)
+- Falls back to a generated WebAudio beep if no audio file is present
+- Flashes the browser UI red/yellow
+- Updates the status banner
+
+The threshold is adjustable in the UI at runtime.
+
+---
+
+## Typical Hardware Setup
+
+```
+Raspberry Pi 4
+├── USB Camera 1   →  crib view   →  port 8090
+├── USB Camera 2   →  room view   →  port 8093
+├── USB Microphone →  audio alarm
+└── WiFi / Ethernet
+         │
+         └──► Parents connect via browser
+               • Smartphone
+               • Tablet
+               • Laptop
+               • Smart TV
 ```
 
-This launches:
+---
 
-    2 camera monitors
-    1 web portal
+## Security
 
-------------------------------------------------------------------------
+This project is designed for **trusted local networks only**.
 
-# Alarm System
+To expose it outside your home network:
 
-The monitor continuously measures microphone loudness.
+- Use a **VPN** (WireGuard, Tailscale)
+- Put it behind a **reverse proxy** with HTTPS (nginx, Caddy)
+- Add **HTTP basic authentication**
 
-If sound exceeds the threshold:
+---
 
-    Volume > 30%
+## Project Structure
 
-Then:
+```
+babyMonitor.py   Main monitor server (video + audio, one instance per camera)
+portal.py        Multi-camera dashboard aggregator
+audio.py         Audio helpers (volume reading, alarm playback)
+startup.sh       Example launcher script
+index.html       Portal frontend template
+beep_short.*     Alarm sound files (wav / mp3 / ogg)
+requirements.txt Python dependencies
+```
 
--   Alarm sound plays
--   Screen flashes red/yellow
--   Status updates in the UI
+---
 
-If the audio file cannot be played, a **generated WebAudio beep** is
-used instead.
+## Possible Future Improvements
 
-------------------------------------------------------------------------
+- Motion detection & recording
+- Baby cry detection (ML-based)
+- Night vision / IR camera support
+- WebRTC streaming (lower latency than MJPEG)
+- Mobile-optimised UI
+- HTTP authentication
 
-# Audio Files
+---
 
-Optional alarm files supported:
+## License
 
-    beep_short.wav
-    beep_short.mp3
-    beep_short.ogg
-
-If none exist, the system generates a beep using the browser.
-
-------------------------------------------------------------------------
-
-# Camera Overlay
-
-Each video frame includes:
-
--   📅 timestamp
--   📊 vertical volume bar
--   🎚 sound level percentage
-
-This allows quick visual monitoring.
-
-------------------------------------------------------------------------
-
-# Example Setup
-
-    Baby Monitor Raspberry Pi
-    │
-    ├── Camera 1 (crib view)
-    ├── Camera 2 (room view)
-    ├── USB microphone
-    │
-    └── Parents connect via:
-         • Phone
-         • Tablet
-         • Laptop
-         • Smart TV browser
-
-------------------------------------------------------------------------
-
-# Security Notes
-
-This project is intentionally simple and designed for **local network
-use**.
-
-If exposing outside your network, consider:
-
--   VPN access
--   reverse proxy
--   authentication
-
-------------------------------------------------------------------------
-
-# Possible Improvements
-
-Ideas for future work:
-
--   motion detection
--   cry detection using ML
--   event recording
--   night vision / IR camera support
--   WebRTC streaming instead of MJPEG
--   authentication
--   mobile UI improvements
-
-------------------------------------------------------------------------
-
-# License
-
-GPL3 License
+[GPL-3.0](LICENSE)
