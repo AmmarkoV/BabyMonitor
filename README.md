@@ -1,5 +1,14 @@
 # 🍼 Baby Monitor — DIY Raspberry Pi Baby Monitor
 
+![Two-camera portal view](doc/screen1.jpg)
+
+<p align="center"><em>Ares and Hermes the two reasons for developing this application</em></p>
+
+
+
+
+---
+
 > Lightweight, browser-based baby monitor for Raspberry Pi. Streams live video from USB webcams, monitors microphone volume, and sounds an alarm when the baby wakes up — no apps, no cloud, no subscriptions.
 
 ---
@@ -169,6 +178,20 @@ requirements.txt Python dependencies
 - WebRTC streaming (lower latency than MJPEG)
 - Mobile-optimised UI
 - HTTP authentication
+
+---
+
+## ⚠️ Disclaimer
+
+This software is provided **as-is**, for personal and educational use only. It is **not a certified medical or safety device** and must **not** be used as the sole means of monitoring a child.
+
+The author accepts **no liability** for any harm, injury, or loss arising from the use, misuse, or failure of this software. Hardware failures, network outages, software bugs, and misconfiguration can all cause the monitor to stop working without warning.
+
+**Always ensure a responsible adult is physically present or nearby when supervising an infant.**
+
+---
+
+![Two-camera portal view](doc/screen2.jpg)
 
 ---
 
