@@ -2,7 +2,7 @@
 
 ![Two-camera portal view](doc/screen1.jpg)
 
-<p align="center"><em>Ares and Hermes the two reasons for developing this application</em></p>
+<p align="center"><em>Ares and Hermes, the two reasons for developing this application</em></p>
 
 
 
